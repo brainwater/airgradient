@@ -55,6 +55,7 @@ boolean connectWIFI=true;
 
 
 unsigned long currentMillis = 0;
+//unsigned long previousMillis = 0;
 
 const int oledInterval = 5000;
 unsigned long previousOled = 0;
@@ -80,16 +81,24 @@ float temp = 0;
 int hum = 0;
 long val;
 
+const int mqttInterval = 5000;
+unsigned long previousMqtt = 0;
+
 char mqtt_server[40] = "homeassistant.local";
 int mqtt_port = 1883;
 char mqtt_username[40] = "username";
 char mqtt_password[40] = "password";
 
 char unique[40] = "tempUnique";
+
+bool garageOpen = true;
+
+const int garagePin = 13; //Labeled D7
+
 WiFiManager wifiManager;
 WiFiClient client;
 HADevice device(unique);
-HAMqtt mqtt(client, device, 7);
+HAMqtt mqtt(client, device, 10);
 
 HASensorNumber haco2("airGradientCO2");
 HASensorNumber hapms("airGradientPMS");
@@ -97,12 +106,17 @@ HASensorNumber hatmp("airGradientTmp", HASensorNumber::PrecisionP1);
 HASensorNumber hahum("airGradientHum");
 HASensorNumber hapm25("airGradientPM25");
 HASensorNumber hapm1("airGradientPM1");
+HASensorNumber haaqi("airGradientAQI");
+HASensorNumber harssi("airGradientRSSI");
+HABinarySensor hagarage("airGradientGarage");
+
 
 void setup()
 {
   Serial.begin(115200);
   u8g2.setBusClock(100000);
   u8g2.begin();
+  pinMode(garagePin, INPUT_PULLUP);
   updateOLED();
   if (connectWIFI) {
     connectToWifi();
@@ -118,6 +132,7 @@ void setup()
 void loop()
 {
   currentMillis = millis();
+  updateGarage();
   updateOLED();
   updateCo2();
   updatePm25();
@@ -125,7 +140,28 @@ void loop()
   updateTempHum();
   //sendToServer();
   sendToMqtt();
-  delay(1000);
+  //delay(100);
+}
+
+/* Probably don't need since millis() and the previous values are all unsigned long
+ * void updateMillis(){
+  currentMillis = millis();
+  if (previousMillis > currentMillis) {
+    // Overflow! happens after about 50 days according to https://www.arduino.cc/reference/en/language/functions/time/millis/
+    previousOled = 0;
+    previoussendToServer = 0;
+    previousCo2 = 0; 
+    previousPm25 = 0;
+    previousPm1 = 0;
+    previousTempHum = 0;
+    previousMqtt = 0;
+  }
+  previousMillis = currentMillis;
+}*/
+
+
+void updateGarage() {
+  garageOpen = digitalRead(garagePin) == HIGH;
 }
 
 void updateCo2()
@@ -269,17 +305,24 @@ void connectToMqtt() {
   haco2.setName("Air Gradient CO2");
   hapm25.setName("Air Gradient PM2.5");
   hapm1.setName("Air Gradient PM1.0");
+  haaqi.setName("Air Gradient AQI");
+  harssi.setName("Air Gradient WiFi RSSI");
+  hagarage.setName("Air Gradient Garage Door");
   hatmp.setDeviceClass("temperature");
   hahum.setDeviceClass("humidity");
   haco2.setDeviceClass("carbon_dioxide");
   hapm25.setDeviceClass("pm25");
   hapm1.setDeviceClass("pm1");
+  haaqi.setDeviceClass("aqi");
+  harssi.setDeviceClass("signal_strength");
+  hagarage.setDeviceClass("door");
   hatmp.setUnitOfMeasurement("°C");
   hahum.setUnitOfMeasurement("%");
   haco2.setUnitOfMeasurement("ppm");
   //TODO: Are the pm measurement units correct? https://www.home-assistant.io/integrations/sensor/ Indicates the measurements are in µg/m³
   hapm25.setUnitOfMeasurement("ppm");
   hapm1.setUnitOfMeasurement("ppm");
+  harssi.setUnitOfMeasurement("dB");
   mqtt.begin(mqtt_server, mqtt_port, mqtt_username, mqtt_password);
   // Important! I think this is required to make sure the config is sent, but now it is sending the config without this!?
   device.setAvailability(true);
@@ -290,11 +333,17 @@ void connectToMqtt() {
 
 void sendToMqtt() {
   mqtt.loop();
-  hatmp.setValue(temp);
-  hahum.setValue(hum);
-  haco2.setValue(Co2);
-  hapm25.setValue(pm25);
-  hapm1.setValue(pm1);
+  if (currentMillis - previousMqtt >= mqttInterval) {
+    previousMqtt += mqttInterval;
+    hatmp.setValue(temp);
+    hahum.setValue(hum);
+    haco2.setValue(Co2);
+    hapm25.setValue(pm25);
+    hapm1.setValue(pm1);
+    haaqi.setValue(PM_TO_AQI_US(pm25));
+    harssi.setValue(WiFi.RSSI());
+    hagarage.setState(garageOpen);
+  }
 }
 
 // Calculate PM2.5 US AQI
