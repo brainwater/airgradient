@@ -94,11 +94,12 @@ char unique[40] = "tempUnique";
 bool garageOpen = true;
 
 const int garagePin = 13; //Labeled D7
+const int garageButtonPin = 15; //Labeled D8
 
 WiFiManager wifiManager;
 WiFiClient client;
 HADevice device(unique);
-HAMqtt mqtt(client, device, 10);
+HAMqtt mqtt(client, device, 11);
 
 HASensorNumber haco2("airGradientCO2");
 HASensorNumber hapms("airGradientPMS");
@@ -109,6 +110,7 @@ HASensorNumber hapm1("airGradientPM1");
 HASensorNumber haaqi("airGradientAQI");
 HASensorNumber harssi("airGradientRSSI");
 HABinarySensor hagarage("airGradientGarage");
+HAButton hagarage_button("airGradientGarageButton");
 
 
 void setup()
@@ -117,6 +119,8 @@ void setup()
   u8g2.setBusClock(100000);
   u8g2.begin();
   pinMode(garagePin, INPUT_PULLUP);
+  pinMode(garageButtonPin, OUTPUT);
+  //TODO: Do I need to set garageButtonPin to high here?
   updateOLED();
   if (connectWIFI) {
     connectToWifi();
@@ -139,6 +143,7 @@ void loop()
   updatePm1();
   updateTempHum();
   //sendToServer();
+  mqtt.loop();
   sendToMqtt();
   //delay(100);
 }
@@ -159,6 +164,13 @@ void loop()
   previousMillis = currentMillis;
 }*/
 
+void onGarageButtonCommand(HAButton* sender) {
+  if (sender == &hagarage_button) {
+    digitalWrite(garageButtonPin, LOW);
+    delay(100); // TODO: see how long is the minimum for trigering the garage
+    digitalWrite(garageButtonPin, HIGH);
+  }
+}
 
 void updateGarage() {
   garageOpen = digitalRead(garagePin) == HIGH;
@@ -307,7 +319,7 @@ void connectToMqtt() {
   hapm1.setName("Air Gradient PM1.0");
   haaqi.setName("Air Gradient AQI");
   harssi.setName("Air Gradient WiFi RSSI");
-  hagarage.setName("Air Gradient Garage Door");
+  hagarage.setName("Garage Door Sensor");
   hatmp.setDeviceClass("temperature");
   hahum.setDeviceClass("humidity");
   haco2.setDeviceClass("carbon_dioxide");
@@ -323,6 +335,11 @@ void connectToMqtt() {
   hapm25.setUnitOfMeasurement("ppm");
   hapm1.setUnitOfMeasurement("ppm");
   harssi.setUnitOfMeasurement("dB");
+
+  hagarage_button.setIcon("mdi:garage-alert");
+  hagarage_button.setName("Garage Door Open Button");
+
+  hagarage.setIcon("mdi:garage");
   mqtt.begin(mqtt_server, mqtt_port, mqtt_username, mqtt_password);
   // Important! I think this is required to make sure the config is sent, but now it is sending the config without this!?
   device.setAvailability(true);
@@ -332,7 +349,7 @@ void connectToMqtt() {
 }
 
 void sendToMqtt() {
-  mqtt.loop();
+
   if (currentMillis - previousMqtt >= mqttInterval) {
     previousMqtt += mqttInterval;
     hatmp.setValue(temp);
@@ -342,6 +359,11 @@ void sendToMqtt() {
     hapm1.setValue(pm1);
     haaqi.setValue(PM_TO_AQI_US(pm25));
     harssi.setValue(WiFi.RSSI());
+    if (garageOpen) {
+      hagarage.setIcon("mdi:garage-open");
+    } else {
+      hagarage.setIcon("mdi:garage");
+    }
     hagarage.setState(garageOpen);
   }
 }
