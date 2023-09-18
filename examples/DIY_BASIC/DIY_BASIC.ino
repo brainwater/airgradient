@@ -91,10 +91,12 @@ char mqtt_password[40] = "password";
 
 char unique[40] = "tempUnique";
 
-bool garageOpen = true;
+bool garageClosed = false;
+bool garageOpen = false;
 
-const int garagePin = 13; //Labeled D7
+const int garageClosedPin = 13; //Labeled D7
 const int garageButtonPin = 15; //Labeled D8
+const int garageOpenPin = 16; // Labeled D0
 
 WiFiManager wifiManager;
 WiFiClient client;
@@ -109,7 +111,7 @@ HASensorNumber hapm25("airGradientPM25");
 HASensorNumber hapm1("airGradientPM1");
 HASensorNumber haaqi("airGradientAQI");
 HASensorNumber harssi("airGradientRSSI");
-HABinarySensor hagarage("airGradientGarage");
+HACover hagarage("airGradientGarageCover");
 HAButton hagarage_button("airGradientGarageButton");
 
 
@@ -118,7 +120,7 @@ void setup()
   Serial.begin(115200);
   u8g2.setBusClock(100000);
   u8g2.begin();
-  pinMode(garagePin, INPUT_PULLUP);
+  pinMode(garageClosedPin, INPUT_PULLUP);
   pinMode(garageButtonPin, OUTPUT);
   //TODO: Do I need to set garageButtonPin to high here?
   updateOLED();
@@ -166,14 +168,31 @@ void loop()
 
 void onGarageButtonCommand(HAButton* sender) {
   if (sender == &hagarage_button) {
-    digitalWrite(garageButtonPin, LOW);
-    delay(100); // TODO: see how long is the minimum for trigering the garage
-    digitalWrite(garageButtonPin, HIGH);
+    triggerGarageButton();
+  }
+}
+
+void triggerGarageButton() {
+  digitalWrite(garageButtonPin, LOW);
+  delay(500); // TODO: see how long is the minimum for trigering the garage
+  digitalWrite(garageButtonPin, HIGH);
+}
+
+void onGarageCommand(HACover::CoverCommand cmd, HACover *sender) {
+  if (sender == &hagarage) {
+    if (cmd == HACover::CommandOpen && garageClosed && !garageOpen && hagarage.getCurrentState() == HACover::StateClosed) {
+      hagarage.setState(HACover::StateOpening);
+      triggerGarageButton();
+    } else if (cmd == HACover::CommandClose && !garageClosed && garageOpen && hagarage.getCurrentState() == HACover::StateOpen) {
+      hagarage.setState(HACover::StateClosing);
+      triggerGarageButton();
+    } // else we are in an unknown state, or the garage is in the state requested
   }
 }
 
 void updateGarage() {
-  garageOpen = digitalRead(garagePin) == HIGH;
+  garageClosed = digitalRead(garageClosedPin) == LOW;
+  garageOpen = digitalRead(garageOpenPin) == LOW;
 }
 
 void updateCo2()
@@ -319,7 +338,7 @@ void connectToMqtt() {
   hapm1.setName("Air Gradient PM1.0");
   haaqi.setName("Air Gradient AQI");
   harssi.setName("Air Gradient WiFi RSSI");
-  hagarage.setName("Garage Door Sensor");
+  hagarage.setName("Garage Door");
   hatmp.setDeviceClass("temperature");
   hahum.setDeviceClass("humidity");
   haco2.setDeviceClass("carbon_dioxide");
@@ -327,7 +346,7 @@ void connectToMqtt() {
   hapm1.setDeviceClass("pm1");
   haaqi.setDeviceClass("aqi");
   harssi.setDeviceClass("signal_strength");
-  hagarage.setDeviceClass("door");
+  hagarage.setDeviceClass("garage");
   hatmp.setUnitOfMeasurement("°C");
   hahum.setUnitOfMeasurement("%");
   haco2.setUnitOfMeasurement("ppm");
@@ -359,12 +378,17 @@ void sendToMqtt() {
     hapm1.setValue(pm1);
     haaqi.setValue(PM_TO_AQI_US(pm25));
     harssi.setValue(WiFi.RSSI());
-    if (garageOpen) {
-      hagarage.setIcon("mdi:garage-open");
-    } else {
-      hagarage.setIcon("mdi:garage");
+    if (garageClosed && garageOpen) {
+      // We should never get here
+      hagarage.setState(HACover::StateUnknown);
+    } else if (garageClosed && !garageOpen) {
+      hagarage.setState(HACover::StateClosed);
+    } else if (!garageClosed && garageOpen) {
+      hagarage.setState(HACover::StateOpen);
+    } else if (!garageClosed && !garageOpen) {
+      // Garage may be closing or opening, or a sensor may be offline
+      hagarage.setState(HACover::StateUnknown);
     }
-    hagarage.setState(garageOpen);
   }
 }
 
