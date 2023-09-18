@@ -112,17 +112,22 @@ HASensorNumber hapm1("airGradientPM1");
 HASensorNumber haaqi("airGradientAQI");
 HASensorNumber harssi("airGradientRSSI");
 HACover hagarage("airGradientGarageCover");
+//HABinarySensor hagarageclosed("airGradientGarageClosed");
 HAButton hagarage_button("airGradientGarageButton");
 
 
 void setup()
 {
+  // Avoid having the remote trigger on boot
+  digitalWrite(garageButtonPin, HIGH);
+  pinMode(garageButtonPin, OUTPUT);
+  digitalWrite(garageButtonPin, HIGH);
+
   Serial.begin(115200);
   u8g2.setBusClock(100000);
   u8g2.begin();
   pinMode(garageClosedPin, INPUT_PULLUP);
-  pinMode(garageButtonPin, OUTPUT);
-  //TODO: Do I need to set garageButtonPin to high here?
+  pinMode(garageOpenPin, INPUT_PULLUP);
   updateOLED();
   if (connectWIFI) {
     connectToWifi();
@@ -147,24 +152,8 @@ void loop()
   //sendToServer();
   mqtt.loop();
   sendToMqtt();
-  //delay(100);
+  delay(50);
 }
-
-/* Probably don't need since millis() and the previous values are all unsigned long
- * void updateMillis(){
-  currentMillis = millis();
-  if (previousMillis > currentMillis) {
-    // Overflow! happens after about 50 days according to https://www.arduino.cc/reference/en/language/functions/time/millis/
-    previousOled = 0;
-    previoussendToServer = 0;
-    previousCo2 = 0; 
-    previousPm25 = 0;
-    previousPm1 = 0;
-    previousTempHum = 0;
-    previousMqtt = 0;
-  }
-  previousMillis = currentMillis;
-}*/
 
 void onGarageButtonCommand(HAButton* sender) {
   if (sender == &hagarage_button) {
@@ -173,8 +162,9 @@ void onGarageButtonCommand(HAButton* sender) {
 }
 
 void triggerGarageButton() {
+  Serial.println("Pressing the garage button!");
   digitalWrite(garageButtonPin, LOW);
-  delay(500); // TODO: see how long is the minimum for trigering the garage
+  delay(1000); // TODO: see how long is the minimum for trigering the garage
   digitalWrite(garageButtonPin, HIGH);
 }
 
@@ -186,7 +176,10 @@ void onGarageCommand(HACover::CoverCommand cmd, HACover *sender) {
     } else if (cmd == HACover::CommandClose && !garageClosed && garageOpen && hagarage.getCurrentState() == HACover::StateOpen) {
       hagarage.setState(HACover::StateClosing);
       triggerGarageButton();
-    } // else we are in an unknown state, or the garage is in the state requested
+    } else {
+      // else we are in an unknown state, or the garage is in the state requested
+      Serial.println("Garage command recieved but we are in an unknown state or are already in the state requested.");
+    }
   }
 }
 
@@ -339,6 +332,7 @@ void connectToMqtt() {
   haaqi.setName("Air Gradient AQI");
   harssi.setName("Air Gradient WiFi RSSI");
   hagarage.setName("Garage Door");
+  //hagarageclosed.setName("Garage Door Sensor"
   hatmp.setDeviceClass("temperature");
   hahum.setDeviceClass("humidity");
   haco2.setDeviceClass("carbon_dioxide");
@@ -357,6 +351,8 @@ void connectToMqtt() {
 
   hagarage_button.setIcon("mdi:garage-alert");
   hagarage_button.setName("Garage Door Open Button");
+  hagarage_button.onCommand(onGarageButtonCommand);
+  hagarage.onCommand(onGarageCommand);
 
   hagarage.setIcon("mdi:garage");
   mqtt.begin(mqtt_server, mqtt_port, mqtt_username, mqtt_password);
@@ -380,14 +376,22 @@ void sendToMqtt() {
     harssi.setValue(WiFi.RSSI());
     if (garageClosed && garageOpen) {
       // We should never get here
-      hagarage.setState(HACover::StateUnknown);
+      Serial.println("We should never get here! Garage is detected as BOTH open and closed!");
+      hagarage.setState(HACover::StateClosing);
+      hagarage.setAvailability(false);
     } else if (garageClosed && !garageOpen) {
+      Serial.println("Garage Closed");
+      hagarage.setAvailability(true);
       hagarage.setState(HACover::StateClosed);
     } else if (!garageClosed && garageOpen) {
+      Serial.println("Garage Open");
+      hagarage.setAvailability(true);
       hagarage.setState(HACover::StateOpen);
     } else if (!garageClosed && !garageOpen) {
       // Garage may be closing or opening, or a sensor may be offline
-      hagarage.setState(HACover::StateUnknown);
+      Serial.println("Garage is in an unknown state!");
+      hagarage.setState(HACover::StateOpening);
+      hagarage.setAvailability(false);
     }
   }
 }
