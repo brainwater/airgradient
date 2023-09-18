@@ -112,7 +112,6 @@ HASensorNumber hapm1("airGradientPM1");
 HASensorNumber haaqi("airGradientAQI");
 HASensorNumber harssi("airGradientRSSI");
 HACover hagarage("airGradientGarageCover");
-//HABinarySensor hagarageclosed("airGradientGarageClosed");
 HAButton hagarage_button("airGradientGarageButton");
 
 
@@ -332,7 +331,6 @@ void connectToMqtt() {
   haaqi.setName("Air Gradient AQI");
   harssi.setName("Air Gradient WiFi RSSI");
   hagarage.setName("Garage Door");
-  //hagarageclosed.setName("Garage Door Sensor"
   hatmp.setDeviceClass("temperature");
   hahum.setDeviceClass("humidity");
   haco2.setDeviceClass("carbon_dioxide");
